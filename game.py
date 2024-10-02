@@ -57,39 +57,74 @@ class TicTacFoeEnv:
 
     def evaluate_game(self):
         """Evaluate if the game is over and assign rewards"""
-        if self.is_winner(self.current_player):
+        reward = 0
+        
+        # Check if the current player has won
+        if self.check_winner(self.current_player):
             return 1 if self.current_player == "X" else -1, True
+        
+        # Check if the opponent has won (after the current move)
+        opponent = "O" if self.current_player == "X" else "X"
+        if self.check_winner(opponent):
+            return -1, True
+
+        # Check for a draw
         if self.is_draw():
             return -0.5, True
 
-        # Check for longer lines and give a slight reward
-        reward = 0
-        for row in range(5):
-            for col in range(5):
-                if self.board[row][col] == self.current_player:
-                    # Check horizontal line
-                    if col <= 1 and all(self.board[row][col + i] == self.current_player for i in range(5 - col)):
-                        reward += 0.1
-                    # Check vertical line
-                    if row <= 1 and all(self.board[row + i][col] == self.current_player for i in range(5 - row)):
-                        reward += 0.1
-                    # Check diagonal lines
-                    if row <= 1 and col <= 1:
-                        if all(self.board[row + i][col + i] == self.current_player for i in range(5 - max(row, col))):
-                            reward += 0.1
-                        if all(self.board[row + i][col - i] == self.current_player for i in range(5 - max(row, 4 - col))):
-                            reward += 0.1
-        
-        opponent = "O" if self.current_player == "X" else "X"
+        # Slight reward for having longer lines (bonus points for potential winning setups)
+        reward += self.evaluate_lines(self.current_player)
 
-        if self.is_winner(opponent):
-            return -1, True
-
-        # Encourage making a winning move
+        # Check if current player can win in the next turn (to give slight reward for strategic advantage)
         if self.can_win_next_turn(self.current_player):
-            reward += 0.5  # Slight reward for a winning opportunity
+            reward += 0.5  # Small reward for setting up a winning move
 
         return reward, False
+
+
+    def check_winner(self, player):
+        """Check if the given player has a winning line"""
+        # Check rows and columns
+        for i in range(5):
+            if all(self.board[i][j] == player for j in range(5)):  # Row check
+                return True
+            if all(self.board[j][i] == player for j in range(5)):  # Column check
+                return True
+        
+        # Check diagonals
+        if all(self.board[i][i] == player for i in range(5)):  # Main diagonal
+            return True
+        if all(self.board[i][4 - i] == player for i in range(5)):  # Anti-diagonal
+            return True
+        
+        return False
+
+
+    def evaluate_lines(self, player):
+        """Evaluate the board for potential line advantages (bonus for longer lines)"""
+        reward = 0
+        lines_to_check = []
+
+        # Check rows and columns
+        for i in range(5):
+            lines_to_check.append(self.board[i])  # Rows
+            lines_to_check.append(self.board[:, i])  # Columns
+        
+        # Check diagonals
+        lines_to_check.append([self.board[i][i] for i in range(5)])  # Main diagonal
+        lines_to_check.append([self.board[i][4 - i] for i in range(5)])  # Anti-diagonal
+
+        # Reward player for having multiple consecutive marks
+        for line in lines_to_check:
+            count = np.count_nonzero(np.array(line) == player) 
+            if count == 4:
+                reward += 0.45  # Almost winning
+            elif count == 3:
+                reward += 0.3  # Setting up
+            elif count == 2:
+                reward += 0.2  # Small advantage
+
+        return reward
 
 
     def switch_player(self):
