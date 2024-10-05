@@ -1,8 +1,11 @@
 import numpy as np
 import random
-import concurrent.futures
-import multiprocessing
+import torch
+import torch.nn.functional as F
 from game import TicTacFoeEnv  # Assuming your TicTacFoeEnv class is in the "game" module
+
+# Set device to GPU if available
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class QLearningAgent:
     def __init__(self, learning_rate=0.1, discount_factor=0.95, exploration_rate=1.0, exploration_decay=0.995):
@@ -14,7 +17,7 @@ class QLearningAgent:
 
     def get_q_value(self, state, action):
         """Returns the Q-value for a given state-action pair"""
-        return self.q_table.get((self.hash_state(state), action), 0)
+        return self.q_table.get((self.hash_state(state), action), torch.tensor(0.0, device=device))
 
     def set_q_value(self, state, action, value):
         """Sets the Q-value for a given state-action pair"""
@@ -27,26 +30,87 @@ class QLearningAgent:
 
     def choose_action(self, state, available_actions):
         """Choose the action based on the exploration/exploitation strategy (epsilon-greedy)"""
+        if not available_actions:  # No available actions, return None or handle this case
+            return None
         if random.uniform(0, 1) < self.exploration_rate:
             return random.choice(available_actions)
         else:
             q_values = [self.get_q_value(state, action) for action in available_actions]
-            max_value = max(q_values)
+            q_values_tensor = torch.stack(q_values)
+            max_value = torch.max(q_values_tensor).item()
             best_actions = [available_actions[i] for i, v in enumerate(q_values) if v == max_value]
             return random.choice(best_actions)
 
     def learn(self, state, action, reward, next_state, done, available_actions):
         """Update Q-values based on the agent's experience"""
         current_q = self.get_q_value(state, action)
-        max_future_q = 0 if done else max([self.get_q_value(next_state, a) for a in available_actions])
-        
-        new_q = current_q + self.learning_rate * (reward + self.discount_factor * max_future_q - current_q)
+        if done:
+            max_future_q = torch.tensor(0.0, device=device)
+        else:
+            future_q_values = [self.get_q_value(next_state, a) for a in available_actions]
+            max_future_q = torch.max(torch.stack(future_q_values))
+
+        reward_tensor = torch.tensor(reward, device=device)
+        new_q = current_q + self.learning_rate * (reward_tensor + self.discount_factor * max_future_q - current_q)
         self.set_q_value(state, action, new_q)
 
     def decay_exploration(self):
         """Decay the exploration rate over time"""
         self.exploration_rate *= self.exploration_decay
-        self.exploration_rate = max(self.exploration_rate, 0.2)  
+        self.exploration_rate = max(self.exploration_rate, 0.2)
+
+
+def run_batch_episodes(batch_size, agent_x, agent_o, env):
+    """Runs a batch of episodes of Q-learning in parallel."""
+    states = []
+    dones = []
+
+    # Initialize multiple environments for the batch
+    for _ in range(batch_size):
+        states.append(env.reset())
+    
+    dones = [False] * batch_size
+
+    while not all(dones):
+        for i in range(batch_size):
+            if dones[i]:
+                continue
+
+            available_actions = [(r, c) for r in range(5) for c in range(5) if env.board[r][c] == " " or env.replace_count[r][c] < 2]
+            
+            if not available_actions:  # No actions left, continue
+                dones[i] = True
+                continue
+
+            if env.current_player == "X":
+                action = agent_x.choose_action(states[i], available_actions)
+            else:
+                action = agent_o.choose_action(states[i], available_actions)
+
+            if action is None:  # No valid action, end the episode
+                dones[i] = True
+                continue
+
+            next_state, reward, done = env.step(action)
+
+            agent = agent_x if env.current_player == "X" else agent_o
+            agent.learn(states[i], action, reward, next_state, done, available_actions)
+
+            states[i] = next_state
+            dones[i] = done
+
+        # Decay exploration after each batch
+        agent_x.decay_exploration()
+        agent_o.decay_exploration()
+
+
+
+def batch_training(episodes, env, agent_x, agent_o, batch_size=100000):
+    """Batched training of the agents on the GPU."""
+    for episode in range(0, episodes, batch_size):
+        run_batch_episodes(batch_size, agent_x, agent_o, env)
+        # Print progress after each batch
+        print(f"Completed {episode + batch_size}/{episodes} episodes")
 
 
 def evaluate_agent(agent, env, episodes=50):
@@ -63,15 +127,14 @@ def evaluate_agent(agent, env, episodes=50):
         done = False
         while not done:
             available_actions = [(i, j) for i in range(5) for j in range(5) if env.board[i][j] == " " or env.replace_count[i][j] < 2]
-            
+
             if env.current_player == "X":
                 action = agent.choose_action(state, available_actions)
             else:
                 action = random.choice(available_actions)
-            
+
             next_state, reward, done = env.step(action)
             results["total_reward"] += reward
-            
             state = next_state
 
             if done:
@@ -84,64 +147,6 @@ def evaluate_agent(agent, env, episodes=50):
     print(f"Results after {episodes} episodes:")
     print(f"Wins: {results['wins']}, Losses: {results['losses']}, Draws: {results['draws']}")
     print(f"Win Rate: {results['wins'] / episodes * 100:.2f}%")
-
-
-def calculate_random_moves(episode, total_episodes=100000, min_moves=0, max_moves=999, step_size=10000):
-    """Calculate the number of random moves based on the current episode in steps of 10,000 episodes."""
-    step = episode // step_size
-    moves = min(min_moves + step, max_moves)
-    return moves
-
-
-def run_single_episode(episode, agent_x, agent_o, env):
-    """Runs a single episode of Q-learning."""
-    last_random_start_moves = calculate_random_moves(episode)
-
-    if random.uniform(0, 1) < 0.25:
-        state = env.reset(random_start_moves=last_random_start_moves)
-    else:
-        state = env.reset()
-
-    done = False
-    while not done:
-        available_actions = [(i, j) for i in range(5) for j in range(5) if env.board[i][j] == " " or env.replace_count[i][j] < 2]
-
-        if env.current_player == "X":
-            action = agent_x.choose_action(state, available_actions)
-        else:
-            action = agent_o.choose_action(state, available_actions)
-
-        next_state, reward, done = env.step(action)
-
-        if env.current_player == "X":
-            agent_x.learn(state, action, reward, next_state, done, available_actions)
-        else:
-            agent_o.learn(state, action, -reward, next_state, done, available_actions)
-
-        state = next_state
-
-    agent_x.decay_exploration()
-    agent_o.decay_exploration()
-
-    return None
-
-
-def parallel_training(episodes, env, agent_x, agent_o, num_workers=26, batch_size=10000):
-    """Parallel training of the agents in batches of `batch_size` episodes"""
-    with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
-        for start in range(0, episodes, batch_size):
-            end = min(start + batch_size, episodes)
-            futures = [executor.submit(run_single_episode, episode, agent_x, agent_o, env) for episode in range(start, end)]
-            
-            # Wait for all the episodes in the current batch to finish
-            for future in concurrent.futures.as_completed(futures):
-                future.result()
-
-            # Evaluate after each batch
-            print(f"Completed episodes: {end}/{episodes}")
-            evaluate_agent(agent_x, env, episodes=100)  # Evaluating the agent
-
-            print(f"Proceeding with the next batch...")
 
 
 def play_vs_agent(env, agent_o):
@@ -182,9 +187,9 @@ env = TicTacFoeEnv()
 agent_x = QLearningAgent()
 agent_o = QLearningAgent()
 
-# Parallel training with multiprocessing
-episodes = 100000
-parallel_training(episodes, env, agent_x, agent_o)
+# Train using GPU and batch training
+episodes = 10000000
+batch_training(episodes, env, agent_x, agent_o)
 
 # After training, play against the agent
 play_vs_agent(env, agent_o)

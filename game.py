@@ -104,8 +104,8 @@ class TicTacFoeEnv:
         elif self.replace_count[row][col] < 2:
             self.board[row][col] = self.current_player
             self.replace_count[row][col] += 1
-            # Add a penalty for reclaiming a cell for the first time (1st claim disadvantage)
-            reward = -0.5 if self.replace_count[row][col] == 1 else 0.5 + self.importance_matrix[row][col]  # Big advantage for second reclaim
+            # Penalty for reclaiming a cell for the first time
+            reward = -0.5 if self.replace_count[row][col] == 1 else 0.5 + self.importance_matrix[row][col]
         else:
             raise ValueError(f"Invalid move at row {row}, col {col}")
 
