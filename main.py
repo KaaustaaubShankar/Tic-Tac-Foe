@@ -59,6 +59,15 @@ class QLearningAgent:
         self.exploration_rate *= self.exploration_decay
         self.exploration_rate = max(self.exploration_rate, 0.2)
 
+def calculate_random_moves(episode, total_episodes=10000000, min_moves=3, max_moves=225, step_size=10000):
+    """Calculate the number of random moves based on the current episode in steps of 10,000 episodes."""
+    # Calculate which step we're in (each step is 10,000 episodes)
+    step = episode // step_size
+
+    # Cap the step to ensure it does not exceed the range for max_moves
+    moves = min(min_moves + step, max_moves)
+    
+    return moves
 
 def run_batch_episodes(batch_size, agent_x, agent_o, env):
     """Runs a batch of episodes of Q-learning in parallel."""
@@ -66,8 +75,13 @@ def run_batch_episodes(batch_size, agent_x, agent_o, env):
     dones = []
 
     # Initialize multiple environments for the batch
-    for _ in range(batch_size):
-        states.append(env.reset())
+    for i in range(batch_size):
+        # 25% of games start with random board positions, scaling random moves with episodes
+        if random.uniform(0, 1) < 0.25:
+            random_start_moves = calculate_random_moves(i, total_episodes=batch_size, step_size=10000)
+            states.append(env.reset(random_start_moves=random_start_moves))
+        else:
+            states.append(env.reset())
     
     dones = [False] * batch_size
 
@@ -102,7 +116,6 @@ def run_batch_episodes(batch_size, agent_x, agent_o, env):
         # Decay exploration after each batch
         agent_x.decay_exploration()
         agent_o.decay_exploration()
-
 
 
 def batch_training(episodes, env, agent_x, agent_o, batch_size=100000):
@@ -188,7 +201,8 @@ agent_x = QLearningAgent()
 agent_o = QLearningAgent()
 
 # Train using GPU and batch training
-episodes = 1000000
+episodes = 10000000
+
 batch_training(episodes, env, agent_x, agent_o)
 print("Agent O")
 evaluate_agent(agent_o, env, episodes=50)

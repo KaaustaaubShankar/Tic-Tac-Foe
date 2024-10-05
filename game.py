@@ -33,8 +33,7 @@ class TicTacFoeEnv:
         return self.get_state()
 
     def random_start(self, random_start_moves):
-        """Randomly place a given number of marks for both players on the board, alternating turns,
-        ensuring that no moves lead to an immediate win condition."""
+        """Randomly place a given number of marks for both players on the board, alternating turns,"""
         players = ["X", "O"]  # Player X always starts, then alternate with O
 
         # Initialize available positions
@@ -99,19 +98,15 @@ class TicTacFoeEnv:
         row, col = action
         if self.board[row][col] == " ":
             self.board[row][col] = self.current_player
-            # Reward based on the importance of the cell
-            reward = self.importance_matrix[row][col]
         elif self.replace_count[row][col] < 2:
             self.board[row][col] = self.current_player
             self.replace_count[row][col] += 1
-            # Penalty for reclaiming a cell for the first time
-            reward = -0.5 if self.replace_count[row][col] == 1 else 0.5 + self.importance_matrix[row][col]
         else:
             raise ValueError(f"Invalid move at row {row}, col {col}")
 
         self.turns += 1
         game_reward, done = self.evaluate_game()
-        reward += game_reward
+        reward = game_reward
 
         if not done:
             self.switch_player()
@@ -132,32 +127,15 @@ class TicTacFoeEnv:
 
     def evaluate_game(self):
         """Evaluate if the game is over and assign rewards"""
-        reward = 0
-
         # Check if the current player has won
         if self.check_winner(self.current_player):
-            return (1 if self.current_player == "X" else -2), True
-
-        # Check if the opponent has won (after the current move)
-        opponent = "O" if self.current_player == "X" else "X"
-        if self.check_winner(opponent):
-            return (-2 if self.current_player == "X" else 1), True
+            return (1 if self.current_player == "X" else -1), True
 
         # Check for a draw
         if self.is_draw():
-            return 0.8, True
+            return 0, True
 
-        # Slight reward for having longer lines (bonus points for potential winning setups)
-        reward += self.evaluate_lines(self.current_player)
-
-        # Add a small penalty to encourage faster wins
-        reward -= 0.01
-
-        # Check if current player can win in the next turn (to give slight reward for strategic advantage)
-        if self.can_win_next_turn(self.current_player):
-            reward += 0.5  # Small reward for setting up a winning move
-
-        return reward, False
+        return 0, False
 
     def check_winner(self, player):
         """Check if the given player has a winning line"""
@@ -175,48 +153,6 @@ class TicTacFoeEnv:
             return True
 
         return False
-
-    def evaluate_lines(self, player):
-        """Evaluate the board for potential line advantages (bonus for longer lines for the player,
-        penalty for opponent's lines)"""
-        
-        reward = 0
-        lines_to_check = []
-
-        # Define opponent
-        opponent = "O" if player == "X" else "X"
-
-        # Check rows and columns
-        for i in range(5):
-            lines_to_check.append(self.board[i])  # Rows
-            lines_to_check.append(self.board[:, i])  # Columns
-
-        # Check diagonals
-        lines_to_check.append([self.board[i][i] for i in range(5)])  # Main diagonal
-        lines_to_check.append([self.board[i][4 - i] for i in range(5)])  # Anti-diagonal
-
-        # Reward player and penalize opponent for having multiple consecutive marks
-        for line in lines_to_check:
-            player_count = np.count_nonzero(np.array(line) == player)
-            opponent_count = np.count_nonzero(np.array(line) == opponent)
-            
-            # Reward for player
-            if player_count == 4:
-                reward += 0.45  # Almost winning
-            elif player_count == 3:
-                reward += 0.3  # Setting up
-            elif player_count == 2:
-                reward += 0.2  # Small advantage
-            
-            # Penalty for opponent
-            if opponent_count == 4:
-                reward -= 0.45  # Opponent almost winning
-            elif opponent_count == 3:
-                reward -= 0.3  # Opponent setting up
-            elif opponent_count == 2:
-                reward -= 0.2  # Opponent small advantage
-
-        return reward
 
     def switch_player(self):
         """Switch between players X and O"""
