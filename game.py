@@ -8,6 +8,15 @@ class TicTacFoeEnv:
         self.current_player = "X"
         self.turns = 0
         self.done = False
+        
+        # Importance matrix to assign more value to strategic positions
+        self.importance_matrix = np.array([
+            [0.6, 0.3, 0.3, 0.3, 0.6],
+            [0.3, 0.6, 0.3, 0.6, 0.3],
+            [0.3, 0.3, 1.0, 0.3, 0.3],
+            [0.3, 0.6, 0.3, 0.6, 0.3],
+            [0.6, 0.3, 0.3, 0.3, 0.6]
+        ])
 
     def reset(self, random_start_moves=0):
         """Reset the environment to the initial state, optionally start with a random number of moves"""
@@ -90,13 +99,13 @@ class TicTacFoeEnv:
         row, col = action
         if self.board[row][col] == " ":
             self.board[row][col] = self.current_player
-            # No reward or penalty for claiming an empty cell
-            reward = 0
+            # Reward based on the importance of the cell
+            reward = self.importance_matrix[row][col]
         elif self.replace_count[row][col] < 2:
             self.board[row][col] = self.current_player
             self.replace_count[row][col] += 1
             # Add a penalty for reclaiming a cell for the first time (1st claim disadvantage)
-            reward = -0.5 if self.replace_count[row][col] == 1 else 0.5  # Big advantage for second reclaim
+            reward = -0.5 if self.replace_count[row][col] == 1 else 0.5 + self.importance_matrix[row][col]  # Big advantage for second reclaim
         else:
             raise ValueError(f"Invalid move at row {row}, col {col}")
 
