@@ -188,8 +188,14 @@ agent_x = QLearningAgent()
 agent_o = QLearningAgent()
 
 # Train using GPU and batch training
-episodes = 10000000
+episodes = 1000000
 batch_training(episodes, env, agent_x, agent_o)
-
+print("Agent O")
+evaluate_agent(agent_o, env, episodes=50)
+print()
+print("Agent X")
+print()
+evaluate_agent(agent_x, env, episodes=50)
 # After training, play against the agent
 play_vs_agent(env, agent_o)
+play_vs_agent(env, agent_x)
