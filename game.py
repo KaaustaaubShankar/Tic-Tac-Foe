@@ -82,8 +82,6 @@ class TicTacFoeEnv:
         # Set the current player for the next turn (X starts if even moves, O if odd)
         self.current_player = "X" if random_start_moves % 2 == 0 else "O"
 
-
-
     def get_state(self):
         """Return the current state as a tuple (board state and current player)"""
         return (self.board.copy(), self.current_player)
