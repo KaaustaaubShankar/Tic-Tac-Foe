@@ -1,8 +1,8 @@
 import random
 import numpy as np
 class QLearningAgent:
-    def __init__(self, learning_rate=0.1, discount_factor=0.95, exploration_rate=1.0, exploration_decay=0.995):
-        self.q_table = {}  # Maps state-action pairs to values
+    def __init__(self, q_table={},learning_rate=0.1, discount_factor=0.95, exploration_rate=1.0, exploration_decay=0.995):
+        self.q_table = q_table if q_table is not None else {}  # Maps state-action pairs to values
         self.learning_rate = learning_rate
         self.discount_factor = discount_factor
         self.exploration_rate = exploration_rate

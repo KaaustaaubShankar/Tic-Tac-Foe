@@ -50,67 +50,6 @@ def calculate_random_moves(episode, total_episodes=100000, min_moves=3, max_move
     
     return moves
 
-# Initialize the environment
-env = TicTacFoeEnv()
-
-# Initialize Q-learning agents and Minimax agent
-agent_x = QLearningAgent()  # Q-learning agent for X
-agent_o = MinimaxAgent(env, depth=3)  # Minimax agent for O (set depth to control search depth)
-
-# Initialize variables
-episodes = 100000
-last_random_start_moves = None  # To store the last calculated random start moves
-
-# Function to calculate the number of random start moves
-def calculate_random_moves(episode, total_episodes, step_size):
-    # Example logic to calculate the number of random moves based on episode progress
-    max_random_moves = 10  # Set max random moves
-    return min((episode // step_size) % max_random_moves, 5)
-
-for episode in range(episodes):
-    # Check if the random start moves should be recalculated
-    current_step = episode // 1000
-    if last_random_start_moves is None or current_step != (episode - 1) // 1000:
-        # Recalculate random_start_moves only if the episode has crossed into a new step
-        last_random_start_moves = calculate_random_moves(episode, episodes, step_size=1000)
-
-    # 25% of games start with random board positions, scaling random moves with episodes
-    if random.uniform(0, 1) < 0.25:
-        state = env.reset(random_start_moves=last_random_start_moves)
-    else:
-        state = env.reset()
-
-    done = False
-    while not done:
-        available_actions = [(i, j) for i in range(5) for j in range(5) if env.board[i][j] == " " or env.replace_count[i][j] < 2]
-
-        # Player X (QLearning Agent) makes a move
-        if env.current_player == "X":
-            action = agent_x.choose_action(state, available_actions)
-        # Player O (Minimax Agent) makes a move
-        else:
-            action = agent_o.get_best_move()
-
-        next_state, reward, done = env.step(action)
-
-        # Update Q-learning agent (Player X) only
-        if env.current_player == "X":
-            agent_x.learn(state, action, reward, next_state, done, available_actions)
-        
-        state = next_state
-
-        # If the game is over, reduce exploration rate for Q-learning agent
-        if done:
-            agent_x.decay_exploration()
-
-    # Periodically evaluate the agent
-    print(f"Episode {episode}/{episodes}")
-    
-    # Periodically evaluate Q-learning agent performance (every 1000 episodes)
-    if episode % 1000 == 0:
-        evaluate_agent(agent_x, env, episodes=100)
-
-
 
 def play_vs_agent(env, agent_o):
     """Play a game against the Q-learning agent (you are X, agent is O)"""
@@ -148,6 +87,60 @@ def play_vs_agent(env, agent_o):
 
         state = next_state
 
+import multiprocessing
+from game import TicTacFoeEnv
+from QLearningAgent import QLearningAgent
+from MinimaxAgent import MinimaxAgent
+import random
 
-# Play against the trained agent
-play_vs_agent(env, agent_o)
+def worker(episodes_per_worker, shared_q_table, lock):
+    env = TicTacFoeEnv()
+    agent_x = QLearningAgent(q_table=shared_q_table)  # Pass the shared Q-table
+    agent_o = MinimaxAgent(env, depth=3)
+
+    for episode in range(episodes_per_worker):
+        state = env.reset()
+        done = False
+        while not done:
+            available_actions = [(i, j) for i in range(5) for j in range(5)
+                                 if env.board[i][j] == " " or env.replace_count[i][j] < 2]
+
+            if env.current_player == "X":
+                action = agent_x.choose_action(state, available_actions)
+            else:
+                action = agent_o.get_best_move()
+
+            next_state, reward, done = env.step(action)
+
+            if env.current_player == "X":
+                with lock:
+                    agent_x.learn(state, action, reward, next_state, done, available_actions)
+
+            state = next_state
+
+            if done:
+                agent_x.decay_exploration()
+        print(f"Worker {multiprocessing.current_process().name} finished episode {episode}")
+if __name__ == "__main__":
+    episodes = 100000
+    num_processes = multiprocessing.cpu_count()
+    episodes_per_worker = episodes // num_processes
+
+    manager = multiprocessing.Manager()
+    shared_q_table = manager.dict()
+    lock = manager.Lock()
+
+    processes = []
+    for _ in range(num_processes):
+        p = multiprocessing.Process(target=worker, args=(episodes_per_worker, shared_q_table, lock))
+        processes.append(p)
+        p.start()
+
+    for p in processes:
+        p.join()
+
+    # After training, evaluate the agent
+    env = TicTacFoeEnv()
+    agent_x = QLearningAgent(q_table=dict(shared_q_table))  # Convert back to a normal dict
+    evaluate_agent(agent_x, env, episodes=100)
+
